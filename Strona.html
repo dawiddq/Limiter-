@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>Limiter prędkości</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: #eee;
+      margin: 0;
+    }
+    header {
+      display: flex;
+      justify-content: flex-end;
+      padding: 10px 20px;
+      background: #222;
+    }
+    #welcome {
+      font-size: 18px;
+      color: #0f0;
+    }
+    .container {
+      text-align: center;
+      background: #222;
+      padding: 30px;
+      border-radius: 15px;
+      box-shadow: 0 0 20px rgba(0,0,0,0.6);
+      max-width: 400px;
+      margin: 50px auto;
+    }
+    h2 { margin-bottom: 20px; }
+    input {
+      padding: 8px;
+      font-size: 16px;
+      margin: 5px;
+      border-radius: 8px;
+      border: none;
+      outline: none;
+    }
+    button {
+      margin: 5px;
+      padding: 8px 15px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      background: #28a745;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover { background: #218838; }
+    .speed {
+      font-size: 50px;
+      margin: 20px 0;
+    }
+    .limit {
+      font-size: 22px;
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div id="welcome"></div>
+  </header>
+
+  <!-- Logowanie / Rejestracja -->
+  <div class="container" id="authBox">
+    <h2>🔑 Logowanie / Rejestracja</h2>
+    <input type="text" id="nick" placeholder="Nick"><br>
+    <input type="password" id="haslo" placeholder="Hasło"><br>
+    <button onclick="zarejestruj()">Rejestracja</button>
+    <button onclick="zaloguj()">Logowanie</button>
+  </div>
+
+  <!-- Główne narzędzie -->
+  <div class="container" id="mainBox" style="display:none;">
+    <h2>🚦 Limiter prędkości</h2>
+    <label>
+      Limit (km/h):
+      <input type="number" id="limit" min="1">
+    </label>
+    <br>
+    <button onclick="zapiszLimit()">Zapisz</button>
+
+    <div class="speed">
+      <span id="predkosc">0</span> km/h
+    </div>
+    <div class="limit">
+      Ustawiony limit: <span id="limit-wyswietlany">-</span> km/h
+    </div>
+    
+    <audio id="alarm" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+  </div>
+
+  <script>
+    // -------------------------
+    // Rejestracja i logowanie
+    // -------------------------
+    function zarejestruj() {
+      const nick = document.getElementById('nick').value;
+      const haslo = document.getElementById('haslo').value;
+
+      if (!nick || !haslo) {
+        alert("Podaj nick i hasło!");
+        return;
+      }
+
+      if (localStorage.getItem("user_" + nick)) {
+        alert("Taki użytkownik już istnieje!");
+        return;
+      }
+
+      localStorage.setItem("user_" + nick, haslo);
+      alert("Rejestracja udana! Możesz się zalogować.");
+    }
+
+    function zaloguj() {
+      const nick = document.getElementById('nick').value;
+      const haslo = document.getElementById('haslo').value;
+
+      const zapisane = localStorage.getItem("user_" + nick);
+      if (zapisane && zapisane === haslo) {
+        localStorage.setItem("loggedUser", nick);
+        pokazMain(nick);
+      } else {
+        alert("Błędny nick lub hasło!");
+      }
+    }
+
+    function pokazMain(nick) {
+      document.getElementById("authBox").style.display = "none";
+      document.getElementById("mainBox").style.display = "block";
+      document.getElementById("welcome").textContent = "Witaj, " + nick;
+      wlaczWakeLock();
+    }
+
+    // Sprawdź czy ktoś jest zalogowany
+    const loggedUser = localStorage.getItem("loggedUser");
+    if (loggedUser) pokazMain(loggedUser);
+
+    // -------------------------
+    // Limit prędkości
+    // -------------------------
+    const limitInput = document.getElementById('limit');
+    const predkoscSpan = document.getElementById('predkosc');
+    const limitSpan = document.getElementById('limit-wyswietlany');
+    const alarm = document.getElementById('alarm');
+
+    let limit = localStorage.getItem('limit') || 50;
+    limit = parseInt(limit);
+    limitSpan.textContent = limit;
+    if(limitInput) limitInput.value = limit;
+
+    function zapiszLimit() {
+      let wpis = parseInt(limitInput.value);
+      if (isNaN(wpis) || wpis < 1) wpis = 1;
+      limit = wpis;
+      localStorage.setItem('limit', limit);
+      limitSpan.textContent = limit;
+    }
+
+    let beepInterval = null;
+
+    function startBeeping(czestotliwosc) {
+      if (!beepInterval) {
+        beepInterval = setInterval(() => {
+          alarm.currentTime = 0;
+          alarm.play();
+        }, czestotliwosc);
+      }
+    }
+
+    function stopBeeping() {
+      if (beepInterval) {
+        clearInterval(beepInterval);
+        beepInterval = null;
+      }
+    }
+
+    if ("geolocation" in navigator) {
+      navigator.geolocation.watchPosition(pos => {
+        const v = pos.coords.speed; // m/s
+        if (v !== null) {
+          const kmh = Math.round(v * 3.6);
+          predkoscSpan.textContent = kmh;
+
+          if (kmh > limit) {
+            const roznica = kmh - limit;
+            let czestotliwosc = 1000; // co 1 sekunda
+            if (roznica > 20) czestotliwosc = 500;  // szybciej
+            if (roznica > 50) czestotliwosc = 250;  // bardzo szybko
+            stopBeeping();
+            startBeeping(czestotliwosc);
+          } else {
+            stopBeeping();
+          }
+        }
+      }, err => {
+        console.error("Błąd GPS:", err);
+      }, { enableHighAccuracy: true });
+    } else {
+      alert("Twoja przeglądarka nie obsługuje GPS.");
+    }
+
+    // -------------------------
+    // Wake Lock (blokada wygaszania)
+    // -------------------------
+    let wakeLock = null;
+
+    async function wlaczWakeLock() {
+      try {
+        wakeLock = await navigator.wakeLock.request("screen");
+        console.log("✅ Ekran nie wygaśnie");
+        wakeLock.addEventListener("release", () => {
+          console.log("❌ Wake Lock zwolniony");
+        });
+      } catch (err) {
+        console.error("Wake Lock error:", err);
+        alert("Twoja przeglądarka nie wspiera podtrzymywania ekranu.");
+      }
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (wakeLock !== null && document.visibilityState === "visible") {
+        wlaczWakeLock();
+      }
+    });
+  </script>
+</body>
+</html>
